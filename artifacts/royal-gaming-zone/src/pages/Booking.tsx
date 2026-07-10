@@ -71,6 +71,20 @@ function calcBreakdown(players: number, sessions: number): string {
   return parts.join(" + ");
 }
 
+/**
+ * Returns a single time-range label spanning the full session.
+ * e.g. startSlot="01:00 PM – 01:30 PM", sessions=4 → "01:00 PM – 03:00 PM"
+ */
+function getSessionRange(startSlot: string, sessions: number): string {
+  const startIdx = TIME_SLOTS.indexOf(startSlot);
+  if (startIdx === -1) return startSlot;
+  const endIdx = startIdx + sessions - 1;
+  if (endIdx >= TIME_SLOTS.length) return startSlot;
+  const startTime = startSlot.split(" – ")[0];
+  const endTime = TIME_SLOTS[endIdx].split(" – ")[1];
+  return sessions === 1 ? startSlot : `${startTime} – ${endTime}`;
+}
+
 /** e.g. 3 sessions → "1h 30min" */
 function formatDuration(sessions: number): string {
   const totalMins = sessions * 30;
@@ -182,6 +196,14 @@ export default function Booking() {
       if (bookedSlots.includes(TIME_SLOTS[si])) return false;
     }
     return true;
+  }
+
+  /** True if slot falls inside the currently selected range (but is not the start slot itself). */
+  function isInSelectedRange(slot: string): boolean {
+    if (!selectedSlot || sessions <= 1) return false;
+    const startIdx = TIME_SLOTS.indexOf(selectedSlot);
+    const slotIdx  = TIME_SLOTS.indexOf(slot);
+    return slotIdx > startIdx && slotIdx < startIdx + sessions;
   }
 
   const handleSubmit = async () => {
@@ -425,31 +447,61 @@ export default function Booking() {
                   <span className="text-sm font-display font-bold uppercase tracking-wider">When Would You Like to Play?</span>
                   {slotsLoading && <span className="text-xs text-gray-500 animate-pulse ml-1">loading...</span>}
                 </div>
-                {sessions > 1 && (
-                  <p className="text-xs text-gray-500 mb-2">
-                    Booking {sessions} consecutive slots — {formatDuration(sessions)} total
+
+                {/* Range indicator */}
+                {selectedSlot ? (
+                  <div className="mb-3 px-3 py-2 rounded-lg bg-primary/10 border border-primary/30 flex items-center gap-2">
+                    <CheckCircle className="w-3.5 h-3.5 text-primary shrink-0" />
+                    <p className="text-xs text-primary font-bold">
+                      {getSessionRange(selectedSlot, sessions)}
+                      {sessions > 1 && <span className="text-primary/60 font-normal"> · {formatDuration(sessions)}</span>}
+                    </p>
+                  </div>
+                ) : (
+                  <p className="text-xs text-gray-500 mb-3">
+                    {sessions > 1
+                      ? `Pick a start time — all ${sessions} consecutive slots will be highlighted.`
+                      : "Select your start time below."}
                   </p>
                 )}
+
                 <div className="grid grid-cols-2 gap-2">
                   {TIME_SLOTS.map((slot) => {
                     const available = isSlotAvailable(slot);
                     const isSelected = selectedSlot === slot;
+                    const inRange = isInSelectedRange(slot);
+                    const isEndSlot = sessions > 1 && selectedSlot !== null &&
+                      TIME_SLOTS.indexOf(slot) === TIME_SLOTS.indexOf(selectedSlot) + sessions - 1;
+
                     return (
                       <button
                         key={slot}
-                        disabled={!available}
+                        disabled={!available && !inRange}
                         onClick={() => available && setSelectedSlot(slot)}
                         className={`py-2.5 px-3 rounded-lg border text-sm transition-all text-left relative ${
-                          !available
+                          !available && !inRange
                             ? "border-white/5 bg-card/30 text-gray-700 cursor-not-allowed"
                             : isSelected
                             ? "border-primary bg-primary/20 text-primary box-glow"
+                            : inRange
+                            ? "border-primary/40 bg-primary/10 text-primary/70 cursor-default"
                             : "border-white/10 bg-card hover:border-primary/40 text-gray-300"
                         }`}
                       >
-                        {slot}
-                        {!available && (
+                        <span className={inRange && !isSelected ? "opacity-80" : ""}>
+                          {slot.split(" – ")[0]}
+                        </span>
+                        {!available && !inRange && (
                           <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[9px] uppercase tracking-wider text-red-500/70 font-bold">Booked</span>
+                        )}
+                        {isSelected && sessions > 1 && (
+                          <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[9px] uppercase tracking-wider text-primary font-bold">Start</span>
+                        )}
+                        {isEndSlot && (
+                          <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[9px] uppercase tracking-wider text-primary/70 font-bold">End</span>
+                        )}
+                        {inRange && !isSelected && !isEndSlot && (
+                          <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[9px] text-primary/40">▶</span>
                         )}
                       </button>
                     );
@@ -534,7 +586,7 @@ export default function Booking() {
                     <Clock className="w-5 h-5 text-primary" />
                     <div>
                       <p className="text-xs text-gray-500 uppercase tracking-wider">Time · Duration</p>
-                      <p className="font-bold text-white">{selectedSlot} · {formatDuration(sessions)}</p>
+                      <p className="font-bold text-white">{selectedSlot ? getSessionRange(selectedSlot, sessions) : "—"} · {formatDuration(sessions)}</p>
                     </div>
                   </div>
                   <div className="flex items-center gap-3 text-gray-300">

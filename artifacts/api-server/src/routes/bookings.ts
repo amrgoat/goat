@@ -50,6 +50,20 @@ export function calcCost(players: number, durationMin: number): number {
 }
 
 /**
+ * Returns the full session time label, e.g. "01:00 PM – 03:00 PM" for a 2hr booking.
+ */
+function sessionRangeLabel(startSlot: string, durationMin: number): string {
+  const idx = TIME_SLOTS.indexOf(startSlot as typeof TIME_SLOTS[number]);
+  if (idx === -1) return startSlot;
+  const numSlots = Math.max(1, Math.round(durationMin / 30));
+  const endIdx = idx + numSlots - 1;
+  if (endIdx >= TIME_SLOTS.length) return startSlot;
+  const startTime = startSlot.split(" – ")[0];
+  const endTime = TIME_SLOTS[endIdx].split(" – ")[1];
+  return numSlots === 1 ? startSlot : `${startTime} – ${endTime}`;
+}
+
+/**
  * Returns all 30-min slot indices covered by a booking starting at startSlot.
  * durationMin must be a multiple of 30.
  */
@@ -234,7 +248,7 @@ router.post("/", requireAuth, async (req: any, res) => {
 
   await notify(
     "notify_booking_created",
-    `🎮 <b>New Booking — Pending Approval</b>\nUser: ${user?.name ?? user?.username ?? user?.phone}\nUser ID: ${userId}\nPhone: ${user?.phone}\nGame: ${game}\nPlayers: ${numPlayers}\nDate: ${bookingDate}\nTime: ${timeSlot}\nDuration: ${durationLabel}\nPayment: ${method === "wallet" ? "Wallet" : "Cash"}`,
+    `🎮 <b>New Booking — Pending Approval</b>\nUser: ${user?.name ?? user?.username ?? user?.phone}\nUser ID: ${userId}\nPhone: ${user?.phone}\nGame: ${game}\nPlayers: ${numPlayers}\nDate: ${bookingDate}\nTime: ${sessionRangeLabel(timeSlot, numDuration)}\nDuration: ${durationLabel}\nPayment: ${method === "wallet" ? "Wallet" : "Cash"}`,
     {
       buttons: [
         [{ text: "✅ Confirm Booking", callback_data: `confirm:${booking.id}` }, { text: "❌ Cancel Booking", callback_data: `cancel:${booking.id}` }],

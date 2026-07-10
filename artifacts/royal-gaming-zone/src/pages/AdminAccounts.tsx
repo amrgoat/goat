@@ -10,6 +10,30 @@ import AdminNav from "@/components/admin/AdminNav";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
+const TIME_SLOTS = [
+  "10:00 AM – 10:30 AM", "10:30 AM – 11:00 AM",
+  "11:00 AM – 11:30 AM", "11:30 AM – 12:00 PM",
+  "12:00 PM – 12:30 PM", "12:30 PM – 01:00 PM",
+  "01:00 PM – 01:30 PM", "01:30 PM – 02:00 PM",
+  "02:00 PM – 02:30 PM", "02:30 PM – 03:00 PM",
+  "03:00 PM – 03:30 PM", "03:30 PM – 04:00 PM",
+  "04:00 PM – 04:30 PM", "04:30 PM – 05:00 PM",
+  "05:00 PM – 05:30 PM", "05:30 PM – 06:00 PM",
+  "06:00 PM – 06:30 PM", "06:30 PM – 07:00 PM",
+  "07:00 PM – 07:30 PM", "07:30 PM – 08:00 PM",
+];
+
+function sessionRangeLabel(startSlot: string, durationMin: number): string {
+  const idx = TIME_SLOTS.indexOf(startSlot);
+  if (idx === -1) return startSlot;
+  const numSlots = Math.max(1, Math.round(durationMin / 30));
+  const endIdx = idx + numSlots - 1;
+  if (endIdx >= TIME_SLOTS.length) return startSlot;
+  const startTime = startSlot.split(" – ")[0];
+  const endTime = TIME_SLOTS[endIdx].split(" – ")[1];
+  return numSlots === 1 ? startSlot : `${startTime} – ${endTime}`;
+}
+
 interface Account {
   id: number;
   phone: string;
@@ -303,7 +327,7 @@ export default function AdminAccounts() {
                           <td className="px-5 py-4 text-gray-300 font-medium">{b.game}</td>
                           <td className="px-5 py-4">
                             <div className="text-gray-300 text-sm">{formatISTDate(b.bookingDate, { day: "numeric", month: "short", year: "numeric" })}</div>
-                            <div className="text-xs text-gray-500">{b.timeSlot}</div>
+                            <div className="text-xs text-gray-500">{sessionRangeLabel(b.timeSlot, b.durationMin)}</div>
                           </td>
                           <td className="px-5 py-4">
                             <span className={`px-2 py-1 rounded-full text-xs font-bold uppercase border ${statusColor(b.status)}`}>
@@ -439,7 +463,7 @@ function BookingDetailModal({
               <div>
                 <p className="text-xs text-gray-500 uppercase tracking-wider mb-0.5">Schedule</p>
                 <p className="text-white font-bold">{formatISTDate(b.bookingDate, { day: "numeric", month: "short", year: "numeric" })}</p>
-                <p className="text-sm text-gray-400">{b.timeSlot}</p>
+                <p className="text-sm text-gray-400">{sessionRangeLabel(b.timeSlot, b.durationMin)}</p>
               </div>
             </div>
           </div>
