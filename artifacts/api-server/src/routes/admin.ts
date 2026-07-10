@@ -8,8 +8,9 @@ import { logAudit } from "../lib/audit.js";
 import { calcCost as calcSessionCost } from "./bookings.js";
 
 /** Returns full session range label, e.g. "01:00 PM – 03:00 PM" for a 2-hr booking. */
-function sessionRangeLabel(startSlot: string, durationMin: number): string {
-  if (!durationMin || durationMin <= 30) return startSlot;
+function sessionRangeLabel(startSlot: string, durationMin: number | null | undefined): string {
+  const dur = Number(durationMin) || 0;
+  if (dur <= 30) return startSlot;
   const startTime = startSlot.split(/\s*[–-]\s*/)[0]?.trim();
   if (!startTime) return startSlot;
   const m = startTime.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
@@ -20,7 +21,7 @@ function sessionRangeLabel(startSlot: string, durationMin: number): string {
   if (period === "AM" && h === 12) h = 0;
   if (period === "PM" && h !== 12) h += 12;
   const startMin = h * 60 + min;
-  const endMin   = startMin + durationMin;
+  const endMin   = startMin + dur;
   const fmt = (t: number) => {
     const hh = Math.floor(t / 60) % 24;
     const mm = t % 60;
@@ -502,10 +503,17 @@ router.put("/bookings/:id/status", requireAdmin, async (req: any, res) => {
   const [user] = await db.select().from(usersTable).where(eq(usersTable.id, updated.userId)).limit(1);
   await logAudit(adminName, status === "confirmed" ? "Booking Approved" : status === "cancelled" ? "Booking Cancelled" : "Settings Changed", user?.username ?? user?.phone, `Booking #${updated.id} → ${status}${shouldRefund ? " (wallet refunded)" : ""}`);
 
-  if (status === "confirmed") {
-    await notify("notify_booking_confirmed", `✅ <b>Booking Confirmed</b>\nUser: ${user?.name ?? user?.phone}\nGame: ${updated.game}\nDate: ${updated.bookingDate}\nTime: ${sessionRangeLabel(updated.timeSlot, updated.durationMin)}\nBy: ${adminName}`);
-  } else if (status === "cancelled") {
-    await notify("notify_booking_cancelled", `❌ <b>Booking Cancelled</b>\nUser: ${user?.name ?? user?.phone}\nGame: ${updated.game}\nDate: ${updated.bookingDate}\nTime: ${sessionRangeLabel(updated.timeSlot, updated.durationMin)}\nBy: ${adminName}${shouldRefund ? "\n💰 Wallet refunded" : ""}`);
+  if (status === "confirmed" || status === "cancelled") {
+    const durMin = Number(updated.durationMin) || 30;
+    const h = Math.floor(durMin / 60);
+    const m = durMin % 60;
+    const durationLabel = h === 0 ? `${m}min` : m === 0 ? `${h}hr` : `${h}h${m}min`;
+
+    if (status === "confirmed") {
+      await notify("notify_booking_confirmed", `✅ <b>Booking Confirmed</b>\nUser: ${user?.name ?? user?.phone}\nGame: ${updated.game}\nDate: ${updated.bookingDate}\nTime: ${sessionRangeLabel(updated.timeSlot, updated.durationMin)}\nDuration: ${durationLabel}\nBy: ${adminName}`);
+    } else {
+      await notify("notify_booking_cancelled", `❌ <b>Booking Cancelled</b>\nUser: ${user?.name ?? user?.phone}\nGame: ${updated.game}\nDate: ${updated.bookingDate}\nTime: ${sessionRangeLabel(updated.timeSlot, updated.durationMin)}\nDuration: ${durationLabel}\nBy: ${adminName}${shouldRefund ? "\n💰 Wallet refunded" : ""}`);
+    }
   }
 
   return res.json({ booking: updated, userPhone: user?.phone, userName: user?.name });
