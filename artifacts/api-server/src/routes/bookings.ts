@@ -50,17 +50,37 @@ export function calcCost(players: number, durationMin: number): number {
 }
 
 /**
- * Returns the full session time label, e.g. "01:00 PM – 03:00 PM" for a 2hr booking.
+ * Returns the full session time label, e.g. "01:00 PM – 03:00 PM" for a 2-hr booking.
+ * Computed arithmetically from the start-slot time string so it doesn't depend on
+ * array index matching (avoids encoding-mismatch false negatives).
  */
 function sessionRangeLabel(startSlot: string, durationMin: number): string {
-  const idx = TIME_SLOTS.indexOf(startSlot as typeof TIME_SLOTS[number]);
-  if (idx === -1) return startSlot;
-  const numSlots = Math.max(1, Math.round(durationMin / 30));
-  const endIdx = idx + numSlots - 1;
-  if (endIdx >= TIME_SLOTS.length) return startSlot;
-  const startTime = startSlot.split(" – ")[0];
-  const endTime = TIME_SLOTS[endIdx].split(" – ")[1];
-  return numSlots === 1 ? startSlot : `${startTime} – ${endTime}`;
+  if (durationMin <= 30) return startSlot;
+  // startSlot is e.g. "01:00 PM – 01:30 PM"; take only the start half
+  const startTime = startSlot.split(/\s*[–-]\s*/)[0]?.trim();
+  if (!startTime) return startSlot;
+
+  // Parse "01:00 PM" into total minutes since midnight
+  const m = startTime.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+  if (!m) return startSlot;
+  let h = parseInt(m[1], 10);
+  const min = parseInt(m[2], 10);
+  const period = m[3].toUpperCase();
+  if (period === "AM" && h === 12) h = 0;
+  if (period === "PM" && h !== 12) h += 12;
+  const startMinutes = h * 60 + min;
+  const endMinutes   = startMinutes + durationMin;
+
+  // Format back to "HH:MM AM/PM"
+  const fmt = (totalMin: number) => {
+    const hh = Math.floor(totalMin / 60) % 24;
+    const mm = totalMin % 60;
+    const p  = hh < 12 ? "AM" : "PM";
+    const hh12 = hh === 0 ? 12 : hh > 12 ? hh - 12 : hh;
+    return `${String(hh12).padStart(2, "0")}:${String(mm).padStart(2, "0")} ${p}`;
+  };
+
+  return `${fmt(startMinutes)} – ${fmt(endMinutes)}`;
 }
 
 /**

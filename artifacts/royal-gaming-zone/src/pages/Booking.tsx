@@ -491,7 +491,7 @@ export default function Booking() {
                         <span className={inRange && !isSelected ? "opacity-80" : ""}>
                           {slot.split(" – ")[0]}
                         </span>
-                        {!available && !inRange && (
+                        {!available && !inRange && bookedSlots.includes(slot) && (
                           <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[9px] uppercase tracking-wider text-red-500/70 font-bold">Booked</span>
                         )}
                         {isSelected && sessions > 1 && (
