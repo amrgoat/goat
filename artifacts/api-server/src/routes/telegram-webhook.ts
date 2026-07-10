@@ -134,22 +134,10 @@ router.post("/webhook", requireTelegramSecret, async (req, res) => {
       const [rawCmd] = msgText.trim().split(/\s+/);
       const cmd = (rawCmd ?? "").split("@")[0];
 
-      if (cmd === "/start") {
-        await replyToChat(
-          replyChatId,
-          `👋 Welcome to Royal Gaming Zone bot!\n\nYour Telegram ID is <code>${fromId}</code>.\n\nShare this with your admin to get access.`,
-        );
-      } else {
-        const admin = await getLinkedAdmin(fromId);
-        if (!admin) {
-          await replyToChat(
-            replyChatId,
-            `⛔ Not authorized.\n\nYour Telegram ID is <code>${fromId}</code>.\nShare this with your admin to get access.`,
-          );
-        } else {
-          const reply = await handleCommand(msgText);
-          await replyToChat(replyChatId, reply);
-        }
+      const admin = await getLinkedAdmin(fromId);
+      if (admin) {
+        const reply = await handleCommand(msgText);
+        await replyToChat(replyChatId, reply);
       }
     }
 
