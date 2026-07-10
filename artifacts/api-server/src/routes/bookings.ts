@@ -243,17 +243,16 @@ router.post("/", requireAuth, async (req: any, res) => {
   }
 
   const [user] = await db.select().from(usersTable).where(eq(usersTable.id, userId)).limit(1);
-  const domain = process.env["REPLIT_DEV_DOMAIN"] || process.env["REPLIT_DOMAINS"]?.split(",")[0];
-  const bookingUrl = domain ? `https://${domain}/admin/accounts?tab=bookings&booking=${booking.id}` : null;
+  const prodDomain = process.env["REPLIT_DOMAINS"]?.split(",")[0];
+  const bookingUrl = prodDomain
+    ? `https://${prodDomain}/admin/accounts?tab=bookings&booking=${booking.id}`
+    : null;
 
   await notify(
     "notify_booking_created",
     `🎮 <b>New Booking — Pending Approval</b>\nUser: ${user?.name ?? user?.username ?? user?.phone}\nUser ID: ${userId}\nPhone: ${user?.phone}\nGame: ${game}\nPlayers: ${numPlayers}\nDate: ${bookingDate}\nTime: ${sessionRangeLabel(timeSlot, numDuration)}\nDuration: ${durationLabel}\nPayment: ${method === "wallet" ? "Wallet" : "Cash"}`,
     {
-      buttons: [
-        [{ text: "✅ Confirm Booking", callback_data: `confirm:${booking.id}` }, { text: "❌ Cancel Booking", callback_data: `cancel:${booking.id}` }],
-        ...(bookingUrl ? [[{ text: "📋 Open in Admin Panel", url: bookingUrl }]] : []),
-      ],
+      buttons: bookingUrl ? [[{ text: "📋 Respond", url: bookingUrl }]] : [],
     },
   );
   await logAudit("system", "Booking Created", user?.username ?? user?.phone, `Booking #${booking.id} for ${game} on ${bookingDate} at ${timeSlot}`);
