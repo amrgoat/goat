@@ -89,6 +89,26 @@ async function handleCommand(text: string): Promise<string> {
     return `📊 <b>Overall Sales</b>\nToday: ₹${sum(d0)}\nWeekly: ₹${sum(d7)}\nMonthly: ₹${sum(d30)}\nLifetime: ₹${sum(all)}`;
   }
 
+  // /access <phone> <telegram_id> — grant command access to another admin account
+  // /access <phone> remove        — revoke access
+  if (cmd === "/access") {
+    const phone = rest[0];
+    const tgId = rest[1];
+    if (!phone || !tgId) return "Usage:\n/access &lt;phone&gt; &lt;telegram_id&gt;\n/access &lt;phone&gt; remove";
+
+    const [user] = await db.select().from(usersTable).where(eq(usersTable.phone, phone)).limit(1);
+    if (!user) return `❌ No account found with phone ${phone}.`;
+    if (!["owner", "admin", "staff"].includes(user.role))
+      return `❌ ${user.name ?? phone} is not an admin/staff account.`;
+
+    const newId = tgId.toLowerCase() === "remove" ? null : tgId;
+    await db.update(usersTable).set({ telegramId: newId }).where(eq(usersTable.id, user.id));
+
+    return newId
+      ? `✅ Access granted to ${user.name ?? phone} (${user.role}).`
+      : `✅ Access removed from ${user.name ?? phone}.`;
+  }
+
   return "";
 }
 
