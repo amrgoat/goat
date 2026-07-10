@@ -5,7 +5,6 @@ import { eq, gte, and, sql } from "drizzle-orm";
 import { answerCallbackQuery, editTelegramMessage } from "../lib/telegram.js";
 import { logAudit } from "../lib/audit.js";
 import { getSetting } from "../lib/settings.js";
-import { verifyPassword } from "../lib/auth.js";
 import { istDateString, startOfDayIST, startOfDayForDateStringIST, endOfDayIST } from "../lib/time.js";
 
 const router = Router();
@@ -43,7 +42,7 @@ async function replyToChat(chatId: number | string, text: string): Promise<void>
   }
 }
 
-/** Returns the admin user linked to this Telegram ID, or null if not found / not admin. */
+/** Returns the admin/staff user linked to this Telegram ID, or null if not authorised. */
 async function getLinkedAdmin(telegramId: string): Promise<typeof usersTable.$inferSelect | null> {
   const [user] = await db
     .select()
@@ -59,30 +58,23 @@ function todayStr(): string {
   return istDateString();
 }
 
-function startOfDay(daysAgo: number): Date {
-  return startOfDayIST(daysAgo);
-}
-
-async function revenueBetween(fromDate: Date): Promise<{ recharges: number; payments: number; cash: number; total: number }> {
+async function revenueBetween(fromDate: Date): Promise<{ total: number }> {
   const txs = await db.select().from(transactionsTable).where(gte(transactionsTable.createdAt, fromDate));
-  let recharges = 0, payments = 0, cash = 0;
+  let total = 0;
   for (const t of txs) {
-    if (t.category === "recharge") recharges += t.amount;
-    else if (t.category === "gaming_session") payments += t.amount;
-    else if (t.category === "cash") cash += t.amount;
+    if (["recharge", "gaming_session", "cash"].includes(t.category)) total += t.amount;
   }
-  return { recharges, payments, cash, total: recharges + payments + cash };
+  return { total };
 }
 
 async function handleCommand(text: string): Promise<string> {
   const [rawCmd, ...rest] = text.trim().split(/\s+/);
-  // In group chats Telegram sends commands as "/cmd@BotUsername" — strip the
-  // "@BotUsername" suffix so the match below works the same in DMs and groups.
+  // Strip "@BotUsername" suffix so commands work the same in groups and DMs.
   const cmd = (rawCmd ?? "").split("@")[0];
 
   if (cmd === "/users") {
     const users = await db.select().from(usersTable);
-    const today = await db.select().from(usersTable).where(gte(usersTable.createdAt, startOfDay(0)));
+    const today = await db.select().from(usersTable).where(gte(usersTable.createdAt, startOfDayIST(0)));
     const walletTotal = users.reduce((s, u) => s + u.balance, 0);
     return `👥 <b>Users</b>\nTotal: ${users.length}\nToday's New: ${today.length}\nWallet Total: ₹${walletTotal}`;
   }
@@ -99,66 +91,34 @@ async function handleCommand(text: string): Promise<string> {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return "Usage: /sales or /sales YYYY-MM-DD";
     const from = startOfDayForDateStringIST(date);
     const to = endOfDayIST(date);
-    const txs = await db.select().from(transactionsTable).where(and(gte(transactionsTable.createdAt, from), sql`${transactionsTable.createdAt} <= ${to}`));
+    const txs = await db
+      .select()
+      .from(transactionsTable)
+      .where(and(gte(transactionsTable.createdAt, from), sql`${transactionsTable.createdAt} <= ${to}`));
     let recharges = 0, payments = 0, cashPay = 0;
     for (const t of txs) {
       if (t.category === "recharge") recharges += t.amount;
       else if (t.category === "gaming_session") payments += t.amount;
       else if (t.category === "cash") cashPay += t.amount;
     }
-    const total = recharges + payments + cashPay;
-    return `💵 <b>Sales — ${date}</b>\nWallet Recharges: ₹${recharges}\nWallet Payments: ₹${payments}\nCash Payments: ₹${cashPay}\n<b>Total: ₹${total}</b>`;
+    return `💵 <b>Sales — ${date}</b>\nWallet Recharges: ₹${recharges}\nWallet Payments: ₹${payments}\nCash Payments: ₹${cashPay}\n<b>Total: ₹${recharges + payments + cashPay}</b>`;
   }
 
   if (cmd === "/overallsales") {
     const [today, week, month] = await Promise.all([
-      revenueBetween(startOfDay(0)),
-      revenueBetween(startOfDay(7)),
-      revenueBetween(startOfDay(30)),
+      revenueBetween(startOfDayIST(0)),
+      revenueBetween(startOfDayIST(7)),
+      revenueBetween(startOfDayIST(30)),
     ]);
     const allTxs = await db.select().from(transactionsTable);
-    const lifetime = allTxs.reduce((s, t) => s + (t.category === "recharge" || t.category === "gaming_session" || t.category === "cash" ? t.amount : 0), 0);
+    const lifetime = allTxs.reduce(
+      (s, t) => s + (["recharge", "gaming_session", "cash"].includes(t.category) ? t.amount : 0),
+      0,
+    );
     return `📊 <b>Overall Sales</b>\nToday: ₹${today.total}\nWeekly: ₹${week.total}\nMonthly: ₹${month.total}\nLifetime: ₹${lifetime}`;
   }
 
-  return "Unknown command. Available:\n/users /today /sales /overallsales\n/link &lt;phone&gt; &lt;password&gt;\n/unlink";
-}
-
-/**
- * Handles /link <phone> <password> — authenticates against the DB and stores
- * the sender's Telegram user ID on their account so future commands are
- * authorized without entering any random ID.
- */
-async function handleLink(text: string, telegramId: string): Promise<string> {
-  const parts = text.trim().split(/\s+/);
-  // parts: ["/link", "<phone>", "<password>"]
-  if (parts.length < 3) {
-    return "Usage: /link &lt;phone&gt; &lt;password&gt;\n\nLinks your Telegram account to your Royal Gaming Zone admin account.";
-  }
-  const phone = parts[1]!;
-  const password = parts.slice(2).join(" ");
-
-  const [user] = await db.select().from(usersTable).where(eq(usersTable.phone, phone)).limit(1);
-  if (!user || !user.passwordHash) return "❌ Invalid phone or password.";
-  if (!verifyPassword(password, user.passwordHash)) return "❌ Invalid phone or password.";
-  if (!["owner", "admin", "staff"].includes(user.role)) return "❌ Your account does not have admin access.";
-
-  // Check if this Telegram ID is already linked to a different account
-  const [existing] = await db.select().from(usersTable).where(eq(usersTable.telegramId, telegramId)).limit(1);
-  if (existing && existing.id !== user.id) {
-    return "⚠️ This Telegram account is already linked to a different user. Use /unlink first.";
-  }
-
-  await db.update(usersTable).set({ telegramId }).where(eq(usersTable.id, user.id));
-  return `✅ Linked! Your Telegram account is now connected to <b>${user.name ?? user.phone}</b> (${user.role}).\n\nYou can now use /users /today /sales /overallsales.`;
-}
-
-/** Unlinks the sender's Telegram account from their DB account. */
-async function handleUnlink(telegramId: string): Promise<string> {
-  const [user] = await db.select().from(usersTable).where(eq(usersTable.telegramId, telegramId)).limit(1);
-  if (!user) return "ℹ️ Your Telegram account is not linked to any account.";
-  await db.update(usersTable).set({ telegramId: null }).where(eq(usersTable.id, user.id));
-  return `✅ Unlinked your Telegram account from <b>${user.name ?? user.phone}</b>.`;
+  return "Unknown command.\n\nAvailable: /users /today /sales /overallsales";
 }
 
 /* POST /api/telegram/webhook — Telegram bot webhook (commands + inline button callbacks) */
@@ -174,19 +134,18 @@ router.post("/webhook", requireTelegramSecret, async (req, res) => {
       const [rawCmd] = msgText.trim().split(/\s+/);
       const cmd = (rawCmd ?? "").split("@")[0];
 
-      if (cmd === "/link") {
-        const reply = await handleLink(msgText, fromId);
-        await replyToChat(replyChatId, reply);
-      } else if (cmd === "/unlink") {
-        const reply = await handleUnlink(fromId);
-        await replyToChat(replyChatId, reply);
-      } else if (cmd === "/start") {
-        await replyToChat(replyChatId, "👋 Welcome to Royal Gaming Zone bot!\n\nUse /link &lt;phone&gt; &lt;password&gt; to connect your admin account and unlock commands.");
+      if (cmd === "/start") {
+        await replyToChat(
+          replyChatId,
+          `👋 Welcome to Royal Gaming Zone bot!\n\nYour Telegram ID is <code>${fromId}</code>.\n\nShare this with your admin to get access.`,
+        );
       } else {
-        // All other commands require a linked admin account
         const admin = await getLinkedAdmin(fromId);
         if (!admin) {
-          await replyToChat(replyChatId, "⛔ Not authorized.\n\nUse /link &lt;phone&gt; &lt;password&gt; to connect your account.");
+          await replyToChat(
+            replyChatId,
+            `⛔ Not authorized.\n\nYour Telegram ID is <code>${fromId}</code>.\nShare this with your admin to get access.`,
+          );
         } else {
           const reply = await handleCommand(msgText);
           await replyToChat(replyChatId, reply);
@@ -207,8 +166,7 @@ router.post("/webhook", requireTelegramSecret, async (req, res) => {
         const status = action === "confirm" ? "confirmed" : "cancelled";
         const updates: Record<string, unknown> = { status };
         if (status === "confirmed") { updates.approvedBy = "telegram"; updates.approvedAt = new Date(); }
-        // Only act on bookings still pending approval — prevents double-processing if the
-        // buttons are tapped more than once before Telegram removes them.
+        // Only act on bookings still pending — prevents double-processing.
         const [updated] = await db
           .update(bookingsTable)
           .set(updates)
@@ -218,11 +176,8 @@ router.post("/webhook", requireTelegramSecret, async (req, res) => {
         if (updated) {
           await logAudit("telegram", action === "confirm" ? "Booking Approved" : "Booking Cancelled", null, `Booking #${bookingId} via Telegram`);
           if (callbackQueryId) await answerCallbackQuery(callbackQueryId, status === "confirmed" ? "Booking confirmed" : "Booking cancelled");
-          // Remove the inline buttons and mark the original message so it's clear the action was taken.
           if (chatId && messageId) {
             await editTelegramMessage(chatId, messageId, `${originalText}\n\n${status === "confirmed" ? "✅ Confirmed" : "❌ Cancelled"} via Telegram.`);
-          } else {
-            await replyToChat(chatId ?? "", `Booking #${bookingId} ${status === "confirmed" ? "✅ confirmed" : "❌ cancelled"} via Telegram.`);
           }
         } else if (callbackQueryId) {
           await answerCallbackQuery(callbackQueryId, "This booking was already processed.");
