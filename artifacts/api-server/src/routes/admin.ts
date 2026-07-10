@@ -7,6 +7,30 @@ import { notify, sendEmergencyAlert } from "../lib/telegram.js";
 import { logAudit } from "../lib/audit.js";
 import { calcCost as calcSessionCost } from "./bookings.js";
 
+/** Returns full session range label, e.g. "01:00 PM – 03:00 PM" for a 2-hr booking. */
+function sessionRangeLabel(startSlot: string, durationMin: number): string {
+  if (!durationMin || durationMin <= 30) return startSlot;
+  const startTime = startSlot.split(/\s*[–-]\s*/)[0]?.trim();
+  if (!startTime) return startSlot;
+  const m = startTime.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+  if (!m) return startSlot;
+  let h = parseInt(m[1], 10);
+  const min = parseInt(m[2], 10);
+  const period = m[3].toUpperCase();
+  if (period === "AM" && h === 12) h = 0;
+  if (period === "PM" && h !== 12) h += 12;
+  const startMin = h * 60 + min;
+  const endMin   = startMin + durationMin;
+  const fmt = (t: number) => {
+    const hh = Math.floor(t / 60) % 24;
+    const mm = t % 60;
+    const p  = hh < 12 ? "AM" : "PM";
+    const hh12 = hh === 0 ? 12 : hh > 12 ? hh - 12 : hh;
+    return `${String(hh12).padStart(2, "0")}:${String(mm).padStart(2, "0")} ${p}`;
+  };
+  return `${fmt(startMin)} – ${fmt(endMin)}`;
+}
+
 const router = Router();
 
 /** In-memory failed login tracker: phone -> { count, firstAt } */
@@ -479,9 +503,9 @@ router.put("/bookings/:id/status", requireAdmin, async (req: any, res) => {
   await logAudit(adminName, status === "confirmed" ? "Booking Approved" : status === "cancelled" ? "Booking Cancelled" : "Settings Changed", user?.username ?? user?.phone, `Booking #${updated.id} → ${status}${shouldRefund ? " (wallet refunded)" : ""}`);
 
   if (status === "confirmed") {
-    await notify("notify_booking_confirmed", `✅ <b>Booking Confirmed</b>\nUser: ${user?.name ?? user?.phone}\nGame: ${updated.game}\nDate: ${updated.bookingDate}\nTime: ${updated.timeSlot}\nBy: ${adminName}`);
+    await notify("notify_booking_confirmed", `✅ <b>Booking Confirmed</b>\nUser: ${user?.name ?? user?.phone}\nGame: ${updated.game}\nDate: ${updated.bookingDate}\nTime: ${sessionRangeLabel(updated.timeSlot, updated.durationMin)}\nBy: ${adminName}`);
   } else if (status === "cancelled") {
-    await notify("notify_booking_cancelled", `❌ <b>Booking Cancelled</b>\nUser: ${user?.name ?? user?.phone}\nGame: ${updated.game}\nDate: ${updated.bookingDate}\nTime: ${updated.timeSlot}\nBy: ${adminName}${shouldRefund ? "\n💰 Wallet refunded" : ""}`);
+    await notify("notify_booking_cancelled", `❌ <b>Booking Cancelled</b>\nUser: ${user?.name ?? user?.phone}\nGame: ${updated.game}\nDate: ${updated.bookingDate}\nTime: ${sessionRangeLabel(updated.timeSlot, updated.durationMin)}\nBy: ${adminName}${shouldRefund ? "\n💰 Wallet refunded" : ""}`);
   }
 
   return res.json({ booking: updated, userPhone: user?.phone, userName: user?.name });
