@@ -9,6 +9,7 @@ import { eq } from "drizzle-orm";
 import { hashPassword } from "./lib/auth.js";
 import { scheduleDailyReport } from "./lib/daily-report.js";
 import { sendEmergencyAlert } from "./lib/telegram.js";
+import { getSetting, setSetting } from "./lib/settings.js";
 
 const app: Express = express();
 
@@ -111,5 +112,43 @@ async function seedOwners() {
 }
 
 seedOwners().catch((err) => logger.error({ err }, "Failed to seed owners"));
+
+/**
+ * Re-register the Telegram webhook on every startup so it survives a
+ * deleteWebhook call or environment change. Uses the stored bot token and
+ * webhook secret (generating a new secret if one doesn't exist yet).
+ */
+async function registerWebhookOnStartup() {
+  const botToken = await getSetting("telegram_bot_token");
+  if (!botToken) return; // Telegram not configured yet
+
+  const domain = process.env["REPLIT_DOMAINS"]?.split(",")[0] || process.env["REPLIT_DEV_DOMAIN"];
+  if (!domain) return;
+
+  let secret = await getSetting("telegram_webhook_secret");
+  if (!secret) {
+    secret = (await import("crypto")).randomBytes(24).toString("hex");
+    await setSetting("telegram_webhook_secret", secret);
+  }
+
+  const webhookUrl = `https://${domain}/api/telegram/webhook`;
+  try {
+    const res = await fetch(`https://api.telegram.org/bot${botToken}/setWebhook`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url: webhookUrl, secret_token: secret }),
+    });
+    const data: any = await res.json().catch(() => null);
+    if (data?.ok) {
+      logger.info({ webhookUrl }, "Telegram webhook registered");
+    } else {
+      logger.warn({ data }, "Telegram webhook registration failed");
+    }
+  } catch (err) {
+    logger.warn({ err }, "Telegram webhook registration error");
+  }
+}
+
+registerWebhookOnStartup().catch((err) => logger.error({ err }, "Failed to register Telegram webhook on startup"));
 
 export default app;

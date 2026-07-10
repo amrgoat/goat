@@ -2,9 +2,10 @@ import { Router } from "express";
 import { db } from "@workspace/db";
 import { usersTable, transactionsTable, bookingsTable } from "@workspace/db";
 import { eq, gte, and, sql } from "drizzle-orm";
-import { sendTelegramMessage, answerCallbackQuery, editTelegramMessage } from "../lib/telegram.js";
+import { answerCallbackQuery, editTelegramMessage } from "../lib/telegram.js";
 import { logAudit } from "../lib/audit.js";
 import { getSetting } from "../lib/settings.js";
+import { verifyPassword } from "../lib/auth.js";
 import { istDateString, startOfDayIST, startOfDayForDateStringIST, endOfDayIST } from "../lib/time.js";
 
 const router = Router();
@@ -18,7 +19,6 @@ const router = Router();
 async function requireTelegramSecret(req: any, res: any, next: any) {
   const configuredSecret = await getSetting("telegram_webhook_secret");
   if (!configuredSecret) {
-    // No secret configured yet — refuse to process state-changing webhook calls.
     return res.status(503).json({ ok: false, error: "Telegram webhook secret not configured" });
   }
   const provided = req.headers["x-telegram-bot-api-secret-token"];
@@ -26,6 +26,33 @@ async function requireTelegramSecret(req: any, res: any, next: any) {
     return res.status(401).json({ ok: false, error: "Invalid webhook secret" });
   }
   next();
+}
+
+/** Send a message directly to a specific chat (used for command replies). */
+async function replyToChat(chatId: number | string, text: string): Promise<void> {
+  const botToken = await getSetting("telegram_bot_token");
+  if (!botToken) return;
+  try {
+    await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chat_id: chatId, text, parse_mode: "HTML" }),
+    });
+  } catch {
+    // best-effort
+  }
+}
+
+/** Returns the admin user linked to this Telegram ID, or null if not found / not admin. */
+async function getLinkedAdmin(telegramId: string): Promise<typeof usersTable.$inferSelect | null> {
+  const [user] = await db
+    .select()
+    .from(usersTable)
+    .where(eq(usersTable.telegramId, telegramId))
+    .limit(1);
+  if (!user) return null;
+  if (!["owner", "admin", "staff"].includes(user.role)) return null;
+  return user;
 }
 
 function todayStr(): string {
@@ -94,7 +121,44 @@ async function handleCommand(text: string): Promise<string> {
     return `📊 <b>Overall Sales</b>\nToday: ₹${today.total}\nWeekly: ₹${week.total}\nMonthly: ₹${month.total}\nLifetime: ₹${lifetime}`;
   }
 
-  return "Unknown command. Available: /users /today /sales /overallsales";
+  return "Unknown command. Available:\n/users /today /sales /overallsales\n/link &lt;phone&gt; &lt;password&gt;\n/unlink";
+}
+
+/**
+ * Handles /link <phone> <password> — authenticates against the DB and stores
+ * the sender's Telegram user ID on their account so future commands are
+ * authorized without entering any random ID.
+ */
+async function handleLink(text: string, telegramId: string): Promise<string> {
+  const parts = text.trim().split(/\s+/);
+  // parts: ["/link", "<phone>", "<password>"]
+  if (parts.length < 3) {
+    return "Usage: /link &lt;phone&gt; &lt;password&gt;\n\nLinks your Telegram account to your Royal Gaming Zone admin account.";
+  }
+  const phone = parts[1]!;
+  const password = parts.slice(2).join(" ");
+
+  const [user] = await db.select().from(usersTable).where(eq(usersTable.phone, phone)).limit(1);
+  if (!user || !user.passwordHash) return "❌ Invalid phone or password.";
+  if (!verifyPassword(password, user.passwordHash)) return "❌ Invalid phone or password.";
+  if (!["owner", "admin", "staff"].includes(user.role)) return "❌ Your account does not have admin access.";
+
+  // Check if this Telegram ID is already linked to a different account
+  const [existing] = await db.select().from(usersTable).where(eq(usersTable.telegramId, telegramId)).limit(1);
+  if (existing && existing.id !== user.id) {
+    return "⚠️ This Telegram account is already linked to a different user. Use /unlink first.";
+  }
+
+  await db.update(usersTable).set({ telegramId }).where(eq(usersTable.id, user.id));
+  return `✅ Linked! Your Telegram account is now connected to <b>${user.name ?? user.phone}</b> (${user.role}).\n\nYou can now use /users /today /sales /overallsales.`;
+}
+
+/** Unlinks the sender's Telegram account from their DB account. */
+async function handleUnlink(telegramId: string): Promise<string> {
+  const [user] = await db.select().from(usersTable).where(eq(usersTable.telegramId, telegramId)).limit(1);
+  if (!user) return "ℹ️ Your Telegram account is not linked to any account.";
+  await db.update(usersTable).set({ telegramId: null }).where(eq(usersTable.id, user.id));
+  return `✅ Unlinked your Telegram account from <b>${user.name ?? user.phone}</b>.`;
 }
 
 /* POST /api/telegram/webhook — Telegram bot webhook (commands + inline button callbacks) */
@@ -103,8 +167,31 @@ router.post("/webhook", requireTelegramSecret, async (req, res) => {
     const update = req.body;
 
     if (update.message?.text?.startsWith("/")) {
-      const reply = await handleCommand(update.message.text);
-      await sendTelegramMessage(reply);
+      const msgText: string = update.message.text;
+      const fromId: string = String(update.message.from?.id ?? "");
+      const replyChatId: number | string = update.message.chat?.id ?? fromId;
+
+      const [rawCmd] = msgText.trim().split(/\s+/);
+      const cmd = (rawCmd ?? "").split("@")[0];
+
+      if (cmd === "/link") {
+        const reply = await handleLink(msgText, fromId);
+        await replyToChat(replyChatId, reply);
+      } else if (cmd === "/unlink") {
+        const reply = await handleUnlink(fromId);
+        await replyToChat(replyChatId, reply);
+      } else if (cmd === "/start") {
+        await replyToChat(replyChatId, "👋 Welcome to Royal Gaming Zone bot!\n\nUse /link &lt;phone&gt; &lt;password&gt; to connect your admin account and unlock commands.");
+      } else {
+        // All other commands require a linked admin account
+        const admin = await getLinkedAdmin(fromId);
+        if (!admin) {
+          await replyToChat(replyChatId, "⛔ Not authorized.\n\nUse /link &lt;phone&gt; &lt;password&gt; to connect your account.");
+        } else {
+          const reply = await handleCommand(msgText);
+          await replyToChat(replyChatId, reply);
+        }
+      }
     }
 
     if (update.callback_query) {
@@ -135,7 +222,7 @@ router.post("/webhook", requireTelegramSecret, async (req, res) => {
           if (chatId && messageId) {
             await editTelegramMessage(chatId, messageId, `${originalText}\n\n${status === "confirmed" ? "✅ Confirmed" : "❌ Cancelled"} via Telegram.`);
           } else {
-            await sendTelegramMessage(`Booking #${bookingId} ${status === "confirmed" ? "✅ confirmed" : "❌ cancelled"} via Telegram.`);
+            await replyToChat(chatId ?? "", `Booking #${bookingId} ${status === "confirmed" ? "✅ confirmed" : "❌ cancelled"} via Telegram.`);
           }
         } else if (callbackQueryId) {
           await answerCallbackQuery(callbackQueryId, "This booking was already processed.");

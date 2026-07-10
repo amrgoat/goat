@@ -14,6 +14,7 @@ export const usersTable = pgTable("users", {
   failedLoginAttempts: integer("failed_login_attempts").default(0).notNull(),
   lastLoginUserAgent: text("last_login_user_agent"),
   lastLoginAt: timestamp("last_login_at"),
+  telegramId: varchar("telegram_id", { length: 20 }).unique(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
