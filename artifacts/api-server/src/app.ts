@@ -147,6 +147,15 @@ async function registerWebhookOnStartup() {
   } catch (err) {
     logger.warn({ err }, "Telegram webhook registration error");
   }
+
+  // Register bot commands so they appear in Telegram's command list
+  try {
+    const { registerBotCommands } = await import("./lib/telegram.js");
+    await registerBotCommands(botToken);
+    logger.info("Telegram bot commands registered");
+  } catch (err) {
+    logger.warn({ err }, "Telegram bot commands registration error");
+  }
 }
 
 registerWebhookOnStartup().catch((err) => logger.error({ err }, "Failed to register Telegram webhook on startup"));

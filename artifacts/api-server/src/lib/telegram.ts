@@ -97,6 +97,7 @@ export async function registerBotCommands(botToken: string): Promise<boolean> {
           { command: "today", description: "Today's bookings by status" },
           { command: "sales", description: "Sales for today or a given date (YYYY-MM-DD)" },
           { command: "overallsales", description: "Today/weekly/monthly/lifetime sales" },
+          { command: "access", description: "Grant/revoke bot access: /access <phone> <telegram_id> or remove" },
         ],
       }),
     });
