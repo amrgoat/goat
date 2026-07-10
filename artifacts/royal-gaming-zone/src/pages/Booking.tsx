@@ -153,7 +153,7 @@ export default function Booking() {
   const [balanceFetchFailed, setBalanceFetchFailed] = useState(false);
 
   useEffect(() => {
-    if (!token) setLocation("/customer-portal");
+    if (!token) setLocation("/customer-portal?tab=register");
   }, [token, setLocation]);
 
   /* Fetch wallet balance once on mount */

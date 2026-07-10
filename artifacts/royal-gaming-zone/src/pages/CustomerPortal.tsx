@@ -137,7 +137,9 @@ export default function CustomerPortal() {
 }
 
 function AuthPanel({ onSuccess }: { onSuccess: (token: string, phone: string, username?: string) => void }) {
-  const [subMode, setSubMode] = useState<SubMode>("login");
+  const [subMode, setSubMode] = useState<SubMode>(() =>
+    new URLSearchParams(window.location.search).get("tab") === "register" ? "register" : "login"
+  );
   const [phone, setPhone] = useState("");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
