@@ -1,57 +1,51 @@
 # Royal Gaming Zone
 
-A gaming center management system with a customer portal and admin/staff panel.
-
-## What It Does
-
-- **Customer Portal** — Phone-based registration, wallet management, and session booking
-- **Admin/Staff Panel** — Account management, role assignments (`owner`, `admin`, `staff`, `player`), balance adjustments, and booking oversight
+A management system for a gaming café/esports center (Padampur). Includes a customer-facing landing page, booking portal, and admin dashboard.
 
 ## Stack
 
-| Layer | Tech |
-|---|---|
-| Frontend | React 19, Vite, TypeScript, Tailwind CSS 4, TanStack Query, Framer Motion |
-| Backend | Node.js 24, Express 5, Drizzle ORM |
-| Database | PostgreSQL (Replit built-in) |
-| Monorepo | pnpm workspaces |
+- **Frontend**: React 19 + Vite + Tailwind CSS 4 + Framer Motion + Wouter + TanStack Query
+- **Backend**: Node.js + Express 5 + Drizzle ORM
+- **Database**: PostgreSQL (Replit-managed)
+- **Shared libs**: `lib/db` (schema + client), `lib/api-zod` (validation), `lib/api-client-react` (React hooks)
+- **Integrations**: Telegram Bot (configured via admin UI, not env vars)
 
-## How to Run
+## Running the app
 
-Both services are configured as managed workflows:
+Two services run in parallel:
 
-| Service | Workflow name | Port |
+| Service | Workflow | Port |
 |---|---|---|
-| Frontend | `artifacts/royal-gaming-zone: web` | 26077 |
-| API Server | `artifacts/api-server: API Server` | 8080 |
+| React frontend | `artifacts/royal-gaming-zone: web` | 26077 (auto) |
+| API server | `artifacts/api-server: API Server` | 8080 (auto) |
 
-They start automatically. To restart manually, use the Workflows panel.
-
-## Environment Variables
-
-| Variable | Source |
-|---|---|
-| `DATABASE_URL` | Auto-provisioned by Replit (do not set manually) |
-| `SESSION_SECRET` | Set as a Replit Secret |
-| `PORT` | Injected by the workflow runner |
-| `BASE_PATH` | Injected by the workflow runner |
+Start both workflows from the Replit workflow panel.
 
 ## Database
 
-Schema is managed with Drizzle ORM. To push schema changes to the dev database:
+The Replit-managed PostgreSQL database is used automatically via `DATABASE_URL` (runtime-managed). To push schema changes:
 
 ```bash
-pnpm --filter @workspace/db run push
+cd lib/db && pnpm run push
 ```
 
-## Generated Packages (stub placeholders)
+## Seeding owner/admin accounts
 
-`lib/api-client-react` and `lib/api-zod` are stub packages that satisfy TypeScript project references. They are intended to be populated by an OpenAPI codegen step (orval) when an OpenAPI spec is added to `lib/api-spec/`. Until then, neither package exports any real types or hooks.
+Set these secrets in Replit before starting the API server:
 
-## Setup Status
+- `OWNER_1_PHONE` — 10-digit phone number
+- `OWNER_1_PASSWORD` — password (min 8 chars)
+- `OWNER_1_NAME` — display name (optional)
+- `OWNER_2_PHONE` / `OWNER_2_PASSWORD` / `OWNER_2_NAME` — optional second owner
 
-Imported project set up on Replit: dependencies installed, dev DB schema pushed via `pnpm --filter @workspace/db run push`, both workflows verified running.
+The server seeds these on startup and skips them gracefully if not set.
 
-## User Preferences
+## Telegram notifications
 
-- Keep the existing project structure — do not restructure or migrate to a different stack
+Configure the Telegram bot token and chat IDs via the admin dashboard UI (Settings → Telegram). No env vars required.
+
+## Session secret
+
+`SESSION_SECRET` is already set as a Replit secret.
+
+## User preferences
