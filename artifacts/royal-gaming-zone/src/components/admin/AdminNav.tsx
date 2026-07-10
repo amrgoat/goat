@@ -1,14 +1,13 @@
 import { Link, useLocation } from "wouter";
-import { Shield, LogOut, Users, CalendarCheck, Wallet, CreditCard, Send, Bell, ScrollText } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Shield, LogOut, Users, Wallet, CreditCard, Send, Bell, ScrollText } from "lucide-react";
 
 const LINKS = [
-  { href: "/admin/accounts", label: "Accounts", icon: Users },
-  { href: "/admin/recharge", label: "Recharge Wallet", icon: Wallet },
-  { href: "/admin/payment", label: "Payment", icon: CreditCard },
-  { href: "/admin/telegram-settings", label: "Telegram", icon: Send },
-  { href: "/admin/notification-settings", label: "Notifications", icon: Bell },
-  { href: "/admin/audit-log", label: "Audit Log", icon: ScrollText },
+  { href: "/admin/accounts",              label: "Accounts",      icon: Users       },
+  { href: "/admin/recharge",              label: "Recharge",      icon: Wallet      },
+  { href: "/admin/payment",               label: "Payment",       icon: CreditCard  },
+  { href: "/admin/telegram-settings",     label: "Telegram",      icon: Send        },
+  { href: "/admin/notification-settings", label: "Notifications", icon: Bell        },
+  { href: "/admin/audit-log",             label: "Audit Log",     icon: ScrollText  },
 ];
 
 export default function AdminNav() {
@@ -20,39 +19,52 @@ export default function AdminNav() {
   };
 
   return (
-    <>
-      <header className="glass-panel-heavy py-4 relative z-20 border-b border-white/10">
-        <div className="container mx-auto px-4 flex justify-between items-center">
-          <div className="flex items-center gap-3">
-            <Shield className="w-6 h-6 text-red-400" />
-            <div className="font-display font-bold text-xl tracking-widest text-white">
-              ADMIN <span className="text-red-400 opacity-80">|</span> PANEL
-            </div>
-          </div>
-          <Button variant="ghost" size="sm" className="text-gray-400 hover:text-red-400" onClick={handleLogout}>
-            <LogOut className="w-4 h-4 mr-2" /> Logout
-          </Button>
+    <header className="sticky top-0 z-30 bg-[#0a0a0f]/90 backdrop-blur-md border-b border-white/8">
+      <div className="container mx-auto px-4 h-14 flex items-center gap-4">
+
+        {/* Brand */}
+        <div className="flex items-center gap-2 shrink-0 mr-2">
+          <Shield className="w-4 h-4 text-red-400" />
+          <span className="font-display font-bold text-sm tracking-widest text-white/80 uppercase">
+            Admin
+          </span>
         </div>
-      </header>
-      <div className="border-b border-white/10 bg-card/30 relative z-10 overflow-x-auto">
-        <div className="container mx-auto px-4 flex gap-0 min-w-max">
+
+        {/* Divider */}
+        <div className="w-px h-5 bg-white/10 shrink-0" />
+
+        {/* Nav links — scrollable on small screens */}
+        <nav className="flex items-center gap-0.5 flex-1 overflow-x-auto scrollbar-none">
           {LINKS.map(({ href, label, icon: Icon }) => {
-            const active = location === href || (href === "/admin/accounts" && location.startsWith("/admin/accounts"));
+            const active =
+              location === href ||
+              (href === "/admin/accounts" && location.startsWith("/admin/accounts"));
             return (
-              <Link key={href} href={href} title={label}>
+              <Link key={href} href={href}>
                 <button
-                  aria-label={label}
-                  className={`px-5 py-4 border-b-2 transition-colors whitespace-nowrap ${
-                    active ? "border-primary text-primary bg-primary/5" : "border-transparent text-gray-400 hover:text-white"
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all ${
+                    active
+                      ? "bg-red-500/15 text-red-400 border border-red-500/25"
+                      : "text-gray-400 hover:text-white hover:bg-white/6 border border-transparent"
                   }`}
                 >
-                  <Icon className="w-5 h-5" />
+                  <Icon className="w-3.5 h-3.5 shrink-0" />
+                  {label}
                 </button>
               </Link>
             );
           })}
-        </div>
+        </nav>
+
+        {/* Logout */}
+        <button
+          onClick={handleLogout}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-gray-500 hover:text-red-400 hover:bg-red-500/8 border border-transparent hover:border-red-500/20 transition-all shrink-0"
+        >
+          <LogOut className="w-3.5 h-3.5" />
+          Logout
+        </button>
       </div>
-    </>
+    </header>
   );
 }
