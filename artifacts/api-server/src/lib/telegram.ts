@@ -3,7 +3,8 @@ import { logger } from "./logger.js";
 
 interface InlineButton {
   text: string;
-  callback_data: string;
+  callback_data?: string;
+  url?: string;
 }
 
 /** Low-level sender — all messages (notifications, alerts, reports, command replies) go to the group chat only when one is configured. */

@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
-import { motion } from "framer-motion";
-import { Plus, Search, User, Wallet, X, CalendarCheck, CheckCircle, XCircle, Clock } from "lucide-react";
-import { Link, useLocation } from "wouter";
+import { motion, AnimatePresence } from "framer-motion";
+import { Plus, Search, User, Wallet, X, CalendarCheck, CheckCircle, XCircle, Clock, GamepadIcon, CreditCard, MessageSquare } from "lucide-react";
+import { Link, useLocation, useSearch } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -34,8 +34,11 @@ interface Booking {
   game: string;
   bookingDate: string;
   timeSlot: string;
+  players: number;
+  durationMin: number;
   notes: string | null;
   status: string;
+  paymentMethod: string;
   paymentStatus?: string;
   createdAt: string;
   phone: string | null;
@@ -50,7 +53,9 @@ export default function AdminAccounts() {
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
   const [showModal, setShowModal] = useState(false);
+  const [selectedBooking, setSelectedBooking] = useState<Booking | null>(null);
   const [, setLocation] = useLocation();
+  const searchStr = useSearch();
 
   const token = localStorage.getItem("rgz_admin_token");
 
@@ -70,9 +75,26 @@ export default function AdminAccounts() {
     if (!token) return;
     fetch(`${BASE}/api/admin/bookings`, { headers: { Authorization: `Bearer ${token}` } })
       .then((r) => r.json())
-      .then((data) => setBookings(data.bookings || []))
+      .then((data) => {
+        const list: Booking[] = data.bookings || [];
+        setBookings(list);
+
+        // Handle deep link: ?tab=bookings&booking=ID
+        const params = new URLSearchParams(searchStr);
+        const bookingId = params.get("booking");
+        if (bookingId) {
+          const found = list.find((b) => b.id === Number(bookingId));
+          if (found) { setTab("bookings"); setSelectedBooking(found); }
+        }
+      })
       .catch(() => {});
   };
+
+  useEffect(() => {
+    // Check tab param immediately
+    const params = new URLSearchParams(searchStr);
+    if (params.get("tab") === "bookings") setTab("bookings");
+  }, []);
 
   useEffect(() => { fetchAccounts(); fetchBookings(); }, []);
 
@@ -84,7 +106,7 @@ export default function AdminAccounts() {
       body: JSON.stringify({ status }),
     });
     const data = await res.json().catch(() => null);
-    fetchBookings();
+    await fetchBookingsAndSync(id);
 
     if (data?.userPhone && (status === "confirmed" || status === "cancelled")) {
       const b = bookings.find((bk) => bk.id === id);
@@ -96,13 +118,31 @@ export default function AdminAccounts() {
     }
   };
 
+  /** Fetch bookings and keep the selected booking in sync if open */
+  const fetchBookingsAndSync = async (openId?: number) => {
+    if (!token) return;
+    return fetch(`${BASE}/api/admin/bookings`, { headers: { Authorization: `Bearer ${token}` } })
+      .then((r) => r.json())
+      .then((data) => {
+        const list: Booking[] = data.bookings || [];
+        setBookings(list);
+        // Re-sync selected booking if still open
+        const idToSync = openId ?? selectedBooking?.id;
+        if (idToSync) {
+          const updated = list.find((b) => b.id === idToSync);
+          if (updated) setSelectedBooking(updated);
+        }
+      })
+      .catch(() => {});
+  };
+
   const markCashPaid = async (id: number) => {
     if (!token) return;
     await fetch(`${BASE}/api/admin/bookings/${id}/pay-cash`, {
       method: "POST",
       headers: { Authorization: `Bearer ${token}` },
     });
-    fetchBookings();
+    await fetchBookingsAndSync(id);
   };
 
   const filtered = accounts.filter(
@@ -227,8 +267,8 @@ export default function AdminAccounts() {
         {tab === "bookings" && (
           <div className="space-y-4">
             <div className="flex items-center justify-between mb-2">
-              <p className="text-gray-500 text-sm">All booking requests from customers. Confirm or cancel each one.</p>
-              <button onClick={fetchBookings} className="text-xs text-gray-500 hover:text-primary transition-colors uppercase tracking-wider">↻ Refresh</button>
+              <p className="text-gray-500 text-sm">Click any booking to manage it.</p>
+              <button onClick={() => fetchBookingsAndSync()} className="text-xs text-gray-500 hover:text-primary transition-colors uppercase tracking-wider">↻ Refresh</button>
             </div>
 
             {bookings.length === 0 ? (
@@ -244,75 +284,42 @@ export default function AdminAccounts() {
                       <tr className="border-b border-white/10 bg-card/50">
                         <th className="px-5 py-4 text-xs text-gray-400 uppercase tracking-wider font-display">Customer</th>
                         <th className="px-5 py-4 text-xs text-gray-400 uppercase tracking-wider font-display">Game</th>
-                        <th className="px-5 py-4 text-xs text-gray-400 uppercase tracking-wider font-display">Date</th>
-                        <th className="px-5 py-4 text-xs text-gray-400 uppercase tracking-wider font-display">Time Slot</th>
+                        <th className="px-5 py-4 text-xs text-gray-400 uppercase tracking-wider font-display">Date & Time</th>
                         <th className="px-5 py-4 text-xs text-gray-400 uppercase tracking-wider font-display">Status</th>
-                        <th className="px-5 py-4 text-xs text-gray-400 uppercase tracking-wider font-display">Actions</th>
+                        <th className="px-5 py-4 text-xs text-gray-400 uppercase tracking-wider font-display">Payment</th>
                       </tr>
                     </thead>
                     <tbody>
                       {bookings.map((b) => (
-                        <tr key={b.id} className="border-b border-white/5 hover:bg-white/5 transition-colors">
+                        <tr
+                          key={b.id}
+                          onClick={() => setSelectedBooking(b)}
+                          className="border-b border-white/5 hover:bg-primary/5 transition-colors cursor-pointer group"
+                        >
                           <td className="px-5 py-4">
-                            <div className="text-white font-bold">{b.name ?? "—"}</div>
+                            <div className="text-white font-bold group-hover:text-primary transition-colors">{b.name ?? "—"}</div>
                             <div className="text-xs text-gray-500">+91 {b.phone}</div>
                           </td>
                           <td className="px-5 py-4 text-gray-300 font-medium">{b.game}</td>
-                          <td className="px-5 py-4 text-gray-300">{formatISTDate(b.bookingDate, { day: "numeric", month: "short", year: "numeric" })}</td>
-                          <td className="px-5 py-4 text-gray-300 text-sm">{b.timeSlot}</td>
+                          <td className="px-5 py-4">
+                            <div className="text-gray-300 text-sm">{formatISTDate(b.bookingDate, { day: "numeric", month: "short", year: "numeric" })}</div>
+                            <div className="text-xs text-gray-500">{b.timeSlot}</div>
+                          </td>
                           <td className="px-5 py-4">
                             <span className={`px-2 py-1 rounded-full text-xs font-bold uppercase border ${statusColor(b.status)}`}>
                               {b.status.replace("_", " ")}
                             </span>
-                            {b.paymentStatus === "pending_cash" && (
-                              <button
-                                onClick={() => markCashPaid(b.id)}
-                                className="ml-2 px-2 py-1 rounded-full text-xs font-bold uppercase border text-orange-400 bg-orange-500/10 border-orange-500/30 hover:bg-orange-500/20 transition-colors"
-                                title="Mark cash payment received"
-                              >
-                                Cash Due · Mark Paid
-                              </button>
-                            )}
                           </td>
                           <td className="px-5 py-4">
-                            <div className="flex gap-2 flex-wrap">
-                              {b.status !== "confirmed" && (
-                                <button
-                                  onClick={() => updateBookingStatus(b.id, "confirmed")}
-                                  className="p-1.5 rounded-lg bg-green-500/10 border border-green-500/30 text-green-400 hover:bg-green-500/20 transition-colors"
-                                  title="Confirm"
-                                >
-                                  <CheckCircle className="w-4 h-4" />
-                                </button>
-                              )}
-                              {b.status !== "cancelled" && (
-                                <button
-                                  onClick={() => updateBookingStatus(b.id, "cancelled")}
-                                  className="p-1.5 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 hover:bg-red-500/20 transition-colors"
-                                  title="Cancel"
-                                >
-                                  <XCircle className="w-4 h-4" />
-                                </button>
-                              )}
-                              {b.status !== "completed" && (
-                                <button
-                                  onClick={() => updateBookingStatus(b.id, "completed")}
-                                  className="p-1.5 rounded-lg bg-blue-500/10 border border-blue-500/30 text-blue-400 hover:bg-blue-500/20 transition-colors"
-                                  title="Mark Completed"
-                                >
-                                  <CalendarCheck className="w-4 h-4" />
-                                </button>
-                              )}
-                              {b.status !== "no_show" && (
-                                <button
-                                  onClick={() => updateBookingStatus(b.id, "no_show")}
-                                  className="p-1.5 rounded-lg bg-gray-500/10 border border-gray-500/30 text-gray-400 hover:bg-gray-500/20 transition-colors"
-                                  title="Mark No Show"
-                                >
-                                  <Clock className="w-4 h-4" />
-                                </button>
-                              )}
-                            </div>
+                            {b.paymentStatus === "pending_cash" ? (
+                              <span className="px-2 py-1 rounded-full text-xs font-bold uppercase border text-orange-400 bg-orange-500/10 border-orange-500/30">Cash Due</span>
+                            ) : b.paymentStatus === "paid_wallet" ? (
+                              <span className="text-xs text-gray-500">Wallet</span>
+                            ) : b.paymentStatus === "paid_cash" ? (
+                              <span className="text-xs text-gray-500">Cash Paid</span>
+                            ) : (
+                              <span className="text-xs text-gray-500">{b.paymentStatus ?? "—"}</span>
+                            )}
                           </td>
                         </tr>
                       ))}
@@ -324,6 +331,209 @@ export default function AdminAccounts() {
           </div>
         )}
       </main>
+
+      {/* Booking Detail Modal */}
+      <AnimatePresence>
+        {selectedBooking && (
+          <BookingDetailModal
+            booking={selectedBooking}
+            onClose={() => setSelectedBooking(null)}
+            onUpdateStatus={async (id, status) => { await updateBookingStatus(id, status); }}
+            onMarkCashPaid={async (id) => { await markCashPaid(id); }}
+            statusColor={statusColor}
+          />
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+function BookingDetailModal({
+  booking: b,
+  onClose,
+  onUpdateStatus,
+  onMarkCashPaid,
+  statusColor,
+}: {
+  booking: Booking;
+  onClose: () => void;
+  onUpdateStatus: (id: number, status: string) => Promise<void>;
+  onMarkCashPaid: (id: number) => Promise<void>;
+  statusColor: (s: string) => string;
+}) {
+  const [busy, setBusy] = useState(false);
+
+  const act = async (fn: () => Promise<void>) => {
+    setBusy(true);
+    try { await fn(); } finally { setBusy(false); }
+  };
+
+  const durationLabel = b.durationMin >= 60
+    ? `${b.durationMin / 60}h`
+    : `${b.durationMin}min`;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        className="absolute inset-0 bg-black/70 backdrop-blur-sm"
+        onClick={onClose}
+      />
+      <motion.div
+        initial={{ opacity: 0, scale: 0.95, y: 10 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        exit={{ opacity: 0, scale: 0.95, y: 10 }}
+        transition={{ duration: 0.2 }}
+        className="glass-panel border border-primary/20 rounded-2xl w-full max-w-lg relative z-10 overflow-hidden"
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 py-5 border-b border-white/10 bg-card/40">
+          <div>
+            <div className="flex items-center gap-3">
+              <h3 className="text-lg font-display font-bold text-white tracking-wider">Booking #{b.id}</h3>
+              <span className={`px-2 py-0.5 rounded-full text-xs font-bold uppercase border ${statusColor(b.status)}`}>
+                {b.status.replace("_", " ")}
+              </span>
+            </div>
+            <p className="text-xs text-gray-500 mt-0.5">
+              Created {new Date(b.createdAt).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })}
+            </p>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-white p-1 rounded-lg hover:bg-white/10 transition-colors">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="px-6 py-5 space-y-5">
+          {/* Customer */}
+          <div className="flex items-start gap-3">
+            <div className="w-8 h-8 rounded-lg bg-primary/10 border border-primary/20 flex items-center justify-center shrink-0 mt-0.5">
+              <User className="w-4 h-4 text-primary" />
+            </div>
+            <div>
+              <p className="text-xs text-gray-500 uppercase tracking-wider mb-0.5">Customer</p>
+              <p className="text-white font-bold">{b.name ?? "—"}</p>
+              <p className="text-sm text-gray-400">+91 {b.phone}</p>
+            </div>
+          </div>
+
+          {/* Game & Schedule */}
+          <div className="grid grid-cols-2 gap-4">
+            <div className="flex items-start gap-3">
+              <div className="w-8 h-8 rounded-lg bg-primary/10 border border-primary/20 flex items-center justify-center shrink-0 mt-0.5">
+                <GamepadIcon className="w-4 h-4 text-primary" />
+              </div>
+              <div>
+                <p className="text-xs text-gray-500 uppercase tracking-wider mb-0.5">Game</p>
+                <p className="text-white font-bold">{b.game}</p>
+                <p className="text-sm text-gray-400">{b.players} player{b.players !== 1 ? "s" : ""} · {durationLabel}</p>
+              </div>
+            </div>
+            <div className="flex items-start gap-3">
+              <div className="w-8 h-8 rounded-lg bg-primary/10 border border-primary/20 flex items-center justify-center shrink-0 mt-0.5">
+                <CalendarCheck className="w-4 h-4 text-primary" />
+              </div>
+              <div>
+                <p className="text-xs text-gray-500 uppercase tracking-wider mb-0.5">Schedule</p>
+                <p className="text-white font-bold">{formatISTDate(b.bookingDate, { day: "numeric", month: "short", year: "numeric" })}</p>
+                <p className="text-sm text-gray-400">{b.timeSlot}</p>
+              </div>
+            </div>
+          </div>
+
+          {/* Payment */}
+          <div className="flex items-start gap-3">
+            <div className="w-8 h-8 rounded-lg bg-primary/10 border border-primary/20 flex items-center justify-center shrink-0 mt-0.5">
+              <CreditCard className="w-4 h-4 text-primary" />
+            </div>
+            <div className="flex-1">
+              <p className="text-xs text-gray-500 uppercase tracking-wider mb-0.5">Payment</p>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-white font-bold capitalize">{b.paymentMethod}</span>
+                {b.paymentStatus === "pending_cash" && (
+                  <span className="px-2 py-0.5 rounded-full text-xs font-bold uppercase border text-orange-400 bg-orange-500/10 border-orange-500/30">Cash Due</span>
+                )}
+                {b.paymentStatus === "paid_wallet" && (
+                  <span className="px-2 py-0.5 rounded-full text-xs font-bold uppercase border text-green-400 bg-green-500/10 border-green-500/30">Paid</span>
+                )}
+                {b.paymentStatus === "paid_cash" && (
+                  <span className="px-2 py-0.5 rounded-full text-xs font-bold uppercase border text-green-400 bg-green-500/10 border-green-500/30">Cash Paid</span>
+                )}
+                {b.paymentStatus === "refunded" && (
+                  <span className="px-2 py-0.5 rounded-full text-xs font-bold uppercase border text-blue-400 bg-blue-500/10 border-blue-500/30">Refunded</span>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Notes */}
+          {b.notes && (
+            <div className="flex items-start gap-3">
+              <div className="w-8 h-8 rounded-lg bg-primary/10 border border-primary/20 flex items-center justify-center shrink-0 mt-0.5">
+                <MessageSquare className="w-4 h-4 text-primary" />
+              </div>
+              <div>
+                <p className="text-xs text-gray-500 uppercase tracking-wider mb-0.5">Notes</p>
+                <p className="text-gray-300 text-sm">{b.notes}</p>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Actions */}
+        <div className="px-6 pb-6 space-y-3">
+          {b.paymentStatus === "pending_cash" && (
+            <button
+              disabled={busy}
+              onClick={() => act(() => onMarkCashPaid(b.id))}
+              className="w-full py-2.5 rounded-xl text-sm font-bold uppercase tracking-wider border text-orange-400 bg-orange-500/10 border-orange-500/30 hover:bg-orange-500/20 transition-colors disabled:opacity-50"
+            >
+              Mark Cash Received
+            </button>
+          )}
+          <div className="grid grid-cols-2 gap-3">
+            {b.status !== "confirmed" && (
+              <button
+                disabled={busy}
+                onClick={() => act(() => onUpdateStatus(b.id, "confirmed"))}
+                className="flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-bold uppercase tracking-wider border text-green-400 bg-green-500/10 border-green-500/30 hover:bg-green-500/20 transition-colors disabled:opacity-50"
+              >
+                <CheckCircle className="w-4 h-4" /> Confirm
+              </button>
+            )}
+            {b.status !== "cancelled" && (
+              <button
+                disabled={busy}
+                onClick={() => act(() => onUpdateStatus(b.id, "cancelled"))}
+                className="flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-bold uppercase tracking-wider border text-red-400 bg-red-500/10 border-red-500/30 hover:bg-red-500/20 transition-colors disabled:opacity-50"
+              >
+                <XCircle className="w-4 h-4" /> Cancel
+              </button>
+            )}
+            {b.status !== "completed" && (
+              <button
+                disabled={busy}
+                onClick={() => act(() => onUpdateStatus(b.id, "completed"))}
+                className="flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-bold uppercase tracking-wider border text-blue-400 bg-blue-500/10 border-blue-500/30 hover:bg-blue-500/20 transition-colors disabled:opacity-50"
+              >
+                <CalendarCheck className="w-4 h-4" /> Completed
+              </button>
+            )}
+            {b.status !== "no_show" && (
+              <button
+                disabled={busy}
+                onClick={() => act(() => onUpdateStatus(b.id, "no_show"))}
+                className="flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-bold uppercase tracking-wider border text-gray-400 bg-gray-500/10 border-gray-500/30 hover:bg-gray-500/20 transition-colors disabled:opacity-50"
+              >
+                <Clock className="w-4 h-4" /> No Show
+              </button>
+            )}
+          </div>
+        </div>
+      </motion.div>
     </div>
   );
 }

@@ -415,6 +415,8 @@ router.get("/bookings", requireAdmin, async (_req, res) => {
       game: bookingsTable.game,
       bookingDate: bookingsTable.bookingDate,
       timeSlot: bookingsTable.timeSlot,
+      players: bookingsTable.players,
+      durationMin: bookingsTable.durationMin,
       notes: bookingsTable.notes,
       paymentMethod: bookingsTable.paymentMethod,
       paymentStatus: bookingsTable.paymentStatus,
